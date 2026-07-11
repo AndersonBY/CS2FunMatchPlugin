@@ -1,5 +1,6 @@
 ﻿using CounterStrikeSharp.API.Core.Translations;
 using CounterStrikeSharp.API;
+using CounterStrikeSharp.API.Modules.Cvars;
 
 namespace FunMatchPlugin;
 public abstract class FunBaseClass
@@ -17,5 +18,20 @@ public abstract class FunBaseClass
     public virtual void DisPlayHelp()
     {
         Server.PrintToChatAll(StringExtensions.ReplaceColorTags("{RED}") + "[FunMatchPlugin] " + this.Decription);
+    }
+
+    protected static void WithCheats(Action action)
+    {
+        var svCheats = ConVar.Find("sv_cheats")!;
+        bool wasEnabled = svCheats.GetPrimitiveValue<bool>();
+        svCheats.SetValue(true);
+        try
+        {
+            action();
+        }
+        finally
+        {
+            svCheats.SetValue(wasEnabled);
+        }
     }
 }

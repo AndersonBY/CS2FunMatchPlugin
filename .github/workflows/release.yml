@@ -1,0 +1,81 @@
+name: Build Release Package
+
+'on':
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-upload:
+    name: Build and upload FunMatchPlugin.zip
+    if: github.event.release.prerelease == false
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out the released version
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name }}
+
+      - name: Set up .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Build plugin
+        run: dotnet build FunMatchPlugin.csproj --configuration Release
+
+      - name: Create package
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          plugin_dir="package/addons/counterstrikesharp/plugins/FunMatchPlugin"
+          build_dir="bin/Release/net8.0"
+          mkdir -p "$plugin_dir"
+
+          cp "$build_dir/FunMatchPlugin.deps.json" "$plugin_dir/"
+          cp "$build_dir/FunMatchPlugin.dll" "$plugin_dir/"
+          cp "$build_dir/FunMatchPlugin.pdb" "$plugin_dir/"
+
+          (
+            cd package
+            zip -q ../FunMatchPlugin.zip \
+              addons/ \
+              addons/counterstrikesharp/ \
+              addons/counterstrikesharp/plugins/ \
+              addons/counterstrikesharp/plugins/FunMatchPlugin/ \
+              addons/counterstrikesharp/plugins/FunMatchPlugin/FunMatchPlugin.deps.json \
+              addons/counterstrikesharp/plugins/FunMatchPlugin/FunMatchPlugin.dll \
+              addons/counterstrikesharp/plugins/FunMatchPlugin/FunMatchPlugin.pdb
+          )
+
+      - name: Verify package structure
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          zipinfo -1 FunMatchPlugin.zip > actual-entries.txt
+          cat > expected-entries.txt <<'EOF'
+          addons/
+          addons/counterstrikesharp/
+          addons/counterstrikesharp/plugins/
+          addons/counterstrikesharp/plugins/FunMatchPlugin/
+          addons/counterstrikesharp/plugins/FunMatchPlugin/FunMatchPlugin.deps.json
+          addons/counterstrikesharp/plugins/FunMatchPlugin/FunMatchPlugin.dll
+          addons/counterstrikesharp/plugins/FunMatchPlugin/FunMatchPlugin.pdb
+          EOF
+
+          diff --unified expected-entries.txt actual-entries.txt
+          unzip -t FunMatchPlugin.zip
+
+      - name: Upload package to GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh release upload
+          "${{ github.event.release.tag_name }}"
+          FunMatchPlugin.zip
+          --clobber

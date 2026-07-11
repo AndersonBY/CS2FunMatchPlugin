@@ -13,21 +13,26 @@ public class FunToTheMoon : FunBaseClass
     public float BulletGiveAbsV = 100;
     private BasePlugin.GameEventHandler<EventBulletImpact>? EventBulletImpactHandler;
     private BasePlugin.GameEventHandler<EventPlayerHurt>? EventPlayerHurtHandler;
+    private float previousGravity;
+    private bool hasGravitySnapshot;
     public override void Fun(FunMatchPlugin plugin)
     {
         if (Enabled) return;
         Enabled = true;
-        ConVar.Find("sv_cheats")!.SetValue(true);
-        ConVar.Find("sv_gravity")!.SetValue(gravity);
-        ConVar.Find("sv_cheats")!.SetValue(false);
+        var gravityConVar = ConVar.Find("sv_gravity")!;
+        previousGravity = gravityConVar.GetPrimitiveValue<float>();
+        hasGravitySnapshot = true;
+        WithCheats(() => gravityConVar.SetValue(gravity));
         plugin.RegisterEventHandler <EventBulletImpact>(EventBulletImpactHandler = (@event, info) =>
         {
             if (Enabled == false) return HookResult.Stop;
             if (@event.Userid is null) return HookResult.Continue;
-            var pawn = @event.Userid.OriginalControllerOfCurrentPawn.Get()!.PlayerPawn.Get();
+            var pawn = @event.Userid.OriginalControllerOfCurrentPawn.Get()?.PlayerPawn.Get();
+            if (pawn is null || !pawn.IsValid || pawn.AbsOrigin is null) return HookResult.Continue;
             Vector bulletPosition = new Vector(@event.X,@event.Y,@event.Z);
-            Vector playerPosition = pawn!.AbsOrigin!;
+            Vector playerPosition = pawn.AbsOrigin;
             double V2 = Math.Pow(playerPosition.X-bulletPosition.X,2) + Math.Pow(playerPosition.Y-bulletPosition.Y,2) + Math.Pow(playerPosition.Z-bulletPosition.Z,2);
+            if (V2 <= double.Epsilon) return HookResult.Continue;
             float Scale = (float)(BulletGiveAbsV /Math.Sqrt(V2));
             pawn.AbsVelocity.X += (playerPosition.X-bulletPosition.X)*Scale;
             pawn.AbsVelocity.Y += (playerPosition.Y-bulletPosition.Y)*Scale;
@@ -45,12 +50,15 @@ public class FunToTheMoon : FunBaseClass
 
             if (@event.Userid == @event.Attacker) return HookResult.Continue;
 
-            var attacker = @event.Attacker.OriginalControllerOfCurrentPawn.Get()!.PlayerPawn.Get();
-            var victim = @event.Userid.OriginalControllerOfCurrentPawn.Get()!.PlayerPawn.Get();
-            Vector PositionAttacker = new Vector(attacker!.AbsOrigin!.X,attacker.AbsOrigin.Y,attacker.AbsOrigin.Z);
-            Vector PositionVictim = new Vector(victim!.AbsOrigin!.X,victim.AbsOrigin.Y,victim.AbsOrigin.Z);
+            var attacker = @event.Attacker.OriginalControllerOfCurrentPawn.Get()?.PlayerPawn.Get();
+            var victim = @event.Userid.OriginalControllerOfCurrentPawn.Get()?.PlayerPawn.Get();
+            if (attacker is null || victim is null || !attacker.IsValid || !victim.IsValid || attacker.AbsOrigin is null || victim.AbsOrigin is null)
+                return HookResult.Continue;
+            Vector PositionAttacker = new Vector(attacker.AbsOrigin.X,attacker.AbsOrigin.Y,attacker.AbsOrigin.Z);
+            Vector PositionVictim = new Vector(victim.AbsOrigin.X,victim.AbsOrigin.Y,victim.AbsOrigin.Z);
 
             double V2 = Math.Pow(PositionAttacker.X-PositionVictim.X,2) + Math.Pow(PositionAttacker.Y-PositionVictim.Y,2) + Math.Pow(PositionAttacker.Z-PositionVictim.Z,2);
+            if (V2 <= double.Epsilon) return HookResult.Continue;
             float Scale = (float)(BulletGiveAbsV /Math.Sqrt(V2));
             victim.AbsVelocity.X += (PositionVictim.X-PositionAttacker.X)*Scale;
             victim.AbsVelocity.Y += (PositionVictim.Y-PositionAttacker.Y)*Scale;
@@ -62,11 +70,21 @@ public class FunToTheMoon : FunBaseClass
     public override void EndFun(FunMatchPlugin plugin)
     {
         Enabled = false;
-        plugin.DeregisterEventHandler (EventBulletImpactHandler!);
-        plugin.DeregisterEventHandler (EventPlayerHurtHandler!);
-        ConVar.Find("sv_cheats")!.SetValue(true);
-        ConVar.Find("sv_gravity")!.SetValue((float)800);
-        ConVar.Find("sv_cheats")!.SetValue(false);
+        if (EventBulletImpactHandler is not null)
+        {
+            plugin.DeregisterEventHandler(EventBulletImpactHandler);
+            EventBulletImpactHandler = null;
+        }
+        if (EventPlayerHurtHandler is not null)
+        {
+            plugin.DeregisterEventHandler(EventPlayerHurtHandler);
+            EventPlayerHurtHandler = null;
+        }
+        if (hasGravitySnapshot)
+        {
+            WithCheats(() => ConVar.Find("sv_gravity")!.SetValue(previousGravity));
+            hasGravitySnapshot = false;
+        }
     }
 }
 

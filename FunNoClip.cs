@@ -23,52 +23,63 @@ public class FunNoClip : FunBaseClass
     }
     public override void EndFun(FunMatchPlugin plugin)
     {
-        Allplayers = Utilities.GetPlayers();
-        foreach (var p in Allplayers)
-        {
-            if (p.IsValid)
-            {
-                p.ExecuteClientCommandFromServer("noclip 0");              
-            }
-        }
         Enabled = false;
         IsNoClipON = false;
-        ConVar.Find("sv_cheats")!.SetValue(false);
-        Allplayers.Clear();
-        if (NoclipOnTimer is not null) NoclipOnTimer.Kill();
+
+        NoclipOnTimer?.Kill();
+        NoclipOnTimer = null;
+
+        try
+        {
+            WithCheats(() =>
+            {
+                Allplayers = Utilities.GetPlayers();
+                foreach (var p in Allplayers)
+                {
+                    if (p.IsValid)
+                    {
+                        p.ExecuteClientCommandFromServer("noclip 0");
+                    }
+                }
+            });
+        }
+        finally
+        {
+            Allplayers.Clear();
+        }
     }
 
     private void SetNoclip()
     {
+        if (!Enabled) return;
+
         if (IsNoClipON is false)
         {
-            ConVar.Find("sv_cheats")!.SetValue(true);
-            Allplayers = Utilities.GetPlayers();
-            foreach (var p in Allplayers)
+            WithCheats(() =>
             {
-                if (!p.IsValid) continue;
-                if (p.IsBot) continue;
-                if (p.OriginalControllerOfCurrentPawn.Get()!.PlayerPawn.Get()!.IsDefusing || p.OriginalControllerOfCurrentPawn.Get()!.PlayerPawn.Get()!.InBombZone) 
+                Allplayers = Utilities.GetPlayers();
+                foreach (var p in Allplayers)
                 {
-                    continue;
+                    if (!p.IsValid || p.IsBot) continue;
+                    var pawn = p.OriginalControllerOfCurrentPawn.Get()?.PlayerPawn.Get();
+                    if (pawn is null || pawn.IsDefusing || pawn.InBombZone) continue;
+                    p.ExecuteClientCommandFromServer("noclip 1");
                 }
-                p.ExecuteClientCommandFromServer("noclip 1");
-            }
+            });
             IsNoClipON = true;
-            ConVar.Find("sv_cheats")!.SetValue(false);
         }
         else
         {
-            ConVar.Find("sv_cheats")!.SetValue(true);
-            Allplayers = Utilities.GetPlayers();
-            foreach (var p in Allplayers)
+            WithCheats(() =>
             {
-                if (!p.IsValid) continue;
-                if (p.IsBot) continue;
-                p.ExecuteClientCommandFromServer("noclip 0");
-            }
+                Allplayers = Utilities.GetPlayers();
+                foreach (var p in Allplayers)
+                {
+                    if (!p.IsValid || p.IsBot) continue;
+                    p.ExecuteClientCommandFromServer("noclip 0");
+                }
+            });
             IsNoClipON = false;
-            ConVar.Find("sv_cheats")!.SetValue(false);
         }
     }
 }

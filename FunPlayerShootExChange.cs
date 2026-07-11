@@ -23,12 +23,15 @@ public class FunPlayerShootExChange : FunBaseClass
             if (@event.Userid is null) return HookResult.Continue;
 
             if (@event.Userid == @event.Attacker) return HookResult.Continue;
-            var attacker = @event.Attacker.OriginalControllerOfCurrentPawn.Get()!.PlayerPawn.Get();
-            var victim = @event.Userid.OriginalControllerOfCurrentPawn.Get()!.PlayerPawn.Get();
+            var attacker = @event.Attacker.OriginalControllerOfCurrentPawn.Get()?.PlayerPawn.Get();
+            var victim = @event.Userid.OriginalControllerOfCurrentPawn.Get()?.PlayerPawn.Get();
+            if (attacker is null || victim is null || !attacker.IsValid || !victim.IsValid || attacker.AbsOrigin is null || victim.AbsOrigin is null)
+                return HookResult.Continue;
             Vector PositionAttacker = new Vector(attacker!.AbsOrigin!.X,attacker.AbsOrigin.Y,attacker.AbsOrigin.Z);
             Vector PositionVictim = new Vector(victim!.AbsOrigin!.X,victim.AbsOrigin.Y,victim.AbsOrigin.Z);
             Server.NextFrame(() =>
             {
+                if (!Enabled || !attacker.IsValid || !victim.IsValid) return;
                 victim.Teleport(PositionAttacker);
                 attacker.Teleport(PositionVictim);
             });
@@ -42,7 +45,11 @@ public class FunPlayerShootExChange : FunBaseClass
     }
     public override void EndFun(FunMatchPlugin plugin)
     {
-        plugin.DeregisterEventHandler<EventPlayerHurt> (EventPlayerHurtHandler!);
         Enabled = false;
+        if (EventPlayerHurtHandler is not null)
+        {
+            plugin.DeregisterEventHandler(EventPlayerHurtHandler);
+            EventPlayerHurtHandler = null;
+        }
     }
 }

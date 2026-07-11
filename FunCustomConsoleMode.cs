@@ -19,15 +19,16 @@ public class FunCustomConsoleMode : FunBaseClass
 
     public override void EndFun(FunMatchPlugin plugin)
     {
+        if (!Enabled) return;
         Enabled = false;
-        Server.ExecuteCommand("exec " + CFGUnLoadFile);
+        Server.ExecuteCommand($"exec \"{CFGUnLoadFile}\"");
     }
 
     public override void Fun(FunMatchPlugin plugin)
     {
         if (Enabled == true) return;
         Enabled = true;
-        Server.ExecuteCommand("exec " + CFGLoadFile);
+        Server.ExecuteCommand($"exec \"{CFGLoadFile}\"");
     }
     public override void DisPlayHelp()
     {

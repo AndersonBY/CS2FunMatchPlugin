@@ -15,8 +15,9 @@ public class FunBulletTeleport : FunBaseClass
         plugin.RegisterEventHandler <EventBulletImpact>(EventBulletImpactHandler = (@event, info) =>
         {
             if (Enabled == false) return HookResult.Stop;
+            if (@event.Userid is null) return HookResult.Continue;
             Vector Position = new Vector(@event.X,@event.Y,@event.Z);
-            var oringin = @event.Userid!.OriginalControllerOfCurrentPawn.Get()!;
+            var oringin = @event.Userid.OriginalControllerOfCurrentPawn.Get();
             if (oringin is null) return HookResult.Continue;
             var oringinpawn = oringin.PlayerPawn.Get();
             if (oringinpawn is null) return HookResult.Continue;
@@ -30,8 +31,12 @@ public class FunBulletTeleport : FunBaseClass
     }
     public override void EndFun(FunMatchPlugin plugin)
     {
-        plugin.DeregisterEventHandler<EventBulletImpact> (EventBulletImpactHandler!);
         Enabled = false;
+        if (EventBulletImpactHandler is not null)
+        {
+            plugin.DeregisterEventHandler(EventBulletImpactHandler);
+            EventBulletImpactHandler = null;
+        }
     }
 }
 

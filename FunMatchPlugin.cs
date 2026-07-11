@@ -10,15 +10,23 @@ namespace FunMatchPlugin;
 public class FunMatchPlugin : BasePlugin, IPluginConfig<FunMatchPluginConfig>
 {
     public override string ModuleName => "Fun Match Plugin";
-    public override string ModuleVersion => "1.1.1";
+    public override string ModuleVersion => "1.2.0";
     public FunMatchPluginConfig Config { get; set; } = new();
+    private bool isUnloading;
     public override void Load(bool hotReload)
     {
+        isUnloading = false;
         Console.WriteLine("Fun Match Plugin Load!");
         InstallFun(Config);
         InstallCustomModes();
         //FunC4EveryWhere funC4EveryWhere = new(this);
         //FunLists.Add(funC4EveryWhere);
+    }
+
+    public override void Unload(bool hotReload)
+    {
+        isUnloading = true;
+        UnLoadFun();
     }
     public void OnConfigParsed(FunMatchPluginConfig config)
     {
@@ -40,18 +48,32 @@ public class FunMatchPlugin : BasePlugin, IPluginConfig<FunMatchPluginConfig>
         using (StreamReader r = new StreamReader(configpath))
         {
             string json = r.ReadToEnd();
-            CustomModesConfig customModesConfig = JsonSerializer.Deserialize<CustomModesConfig>(json)!;
-            foreach (var mode in customModesConfig.Modes)
+            CustomModesConfig customModesConfig = JsonSerializer.Deserialize<CustomModesConfig>(json)
+                ?? throw new InvalidDataException($"Invalid custom mode configuration: {configpath}");
+            foreach (var mode in customModesConfig.Modes ?? [])
             {
-                var fun_cfg_game = Path.Combine(path_cfg, mode.Fun_cfgfilename);
-                var fun_cfg_config = Path.Combine(configdirectory, mode.Fun_cfgfilename);
-                var endfun_cfg_game = Path.Combine(path_cfg, mode.Endfun_cfgfilename);
-                var endfun_cfg_config = Path.Combine(configdirectory, mode.Endfun_cfgfilename);
+                string loadFileName = ValidateConfigFileName(mode.Fun_cfgfilename);
+                string unloadFileName = ValidateConfigFileName(mode.Endfun_cfgfilename);
+                var fun_cfg_game = Path.Combine(path_cfg, loadFileName);
+                var fun_cfg_config = Path.Combine(configdirectory, loadFileName);
+                var endfun_cfg_game = Path.Combine(path_cfg, unloadFileName);
+                var endfun_cfg_config = Path.Combine(configdirectory, unloadFileName);
                 File.Copy(fun_cfg_config, fun_cfg_game, true);
                 File.Copy(endfun_cfg_config, endfun_cfg_game, true);
-                FunLists.Add(new FunCustomConsoleMode(mode.Decr, mode.Fun_cfgfilename, mode.Endfun_cfgfilename));
+                FunLists.Add(new FunCustomConsoleMode(mode.Decr, loadFileName, unloadFileName));
             }
         }
+    }
+
+    private static string ValidateConfigFileName(string fileName)
+    {
+        if (string.IsNullOrWhiteSpace(fileName) ||
+            !string.Equals(Path.GetExtension(fileName), ".cfg", StringComparison.OrdinalIgnoreCase) ||
+            fileName.Any(character => !char.IsLetterOrDigit(character) && character is not '_' and not '-' and not '.'))
+        {
+            throw new InvalidDataException($"Invalid custom mode cfg filename: {fileName}");
+        }
+        return fileName;
     }
 
     private void InstallFun(FunMatchPluginConfig config)
@@ -65,9 +87,9 @@ public class FunMatchPlugin : BasePlugin, IPluginConfig<FunMatchPluginConfig>
         {
             FunHealTeammates funHealTeammates = new(this)
             {
-                BurnAfterSecond = config.FunHealTeammatesBurnAfterSecond,
-                BurnDamage = config.FunHealTeammatesBurnDamage,
-                HealValue = config.FunHealTeammatesHealValue,
+                BurnAfterSecond = Math.Max(0.1f, config.FunHealTeammatesBurnAfterSecond),
+                BurnDamage = Math.Max(0, config.FunHealTeammatesBurnDamage),
+                HealValue = Math.Max(0, config.FunHealTeammatesHealValue),
             };
             FunLists.Add(funHealTeammates);
         }
@@ -75,9 +97,9 @@ public class FunMatchPlugin : BasePlugin, IPluginConfig<FunMatchPluginConfig>
         {
             FunHealthRaid funHealthRaid = new(this)
             {
-                initHP = config.FunHealthRaidinitHP,
-                maxRaid = config.FunHealthRaidmaxRaid,
-                RaidScale = config.FunHealthRaidScale,
+                initHP = Math.Max(1, config.FunHealthRaidinitHP),
+                maxRaid = Math.Max(0, config.FunHealthRaidmaxRaid),
+                RaidScale = Math.Max(0, config.FunHealthRaidScale),
             };
             FunLists.Add(funHealthRaid);
         }
@@ -85,8 +107,8 @@ public class FunMatchPlugin : BasePlugin, IPluginConfig<FunMatchPluginConfig>
         {
             FunHighHP funHighHP = new(this)
             {
-                maxHP = config.FunHighHPmaxHP,
-                armor = config.FunHighHParmor,
+                maxHP = Math.Max(1, config.FunHighHPmaxHP),
+                armor = Math.Max(0, config.FunHighHParmor),
             };
             FunLists.Add(funHighHP);
         }
@@ -99,8 +121,8 @@ public class FunMatchPlugin : BasePlugin, IPluginConfig<FunMatchPluginConfig>
         {
             FunJumpOrDie funJumpOrDie = new(this)
             {
-                BurnAfterSecond = config.FunJumpOrDieBurnAfterSecond,
-                BurnDamage = config.FunJumpOrDieBurnDamage,
+                BurnAfterSecond = Math.Max(0.1f, config.FunJumpOrDieBurnAfterSecond),
+                BurnDamage = Math.Max(0, config.FunJumpOrDieBurnDamage),
             };
             FunLists.Add(funJumpOrDie);
         }
@@ -108,7 +130,7 @@ public class FunMatchPlugin : BasePlugin, IPluginConfig<FunMatchPluginConfig>
         {
             FunNoClip funNoClip = new(this)
             {
-                interval = config.FunNoClipinterval,
+                interval = Math.Max(0.1f, config.FunNoClipinterval),
             };
             FunLists.Add(funNoClip);
         }
@@ -121,8 +143,8 @@ public class FunMatchPlugin : BasePlugin, IPluginConfig<FunMatchPluginConfig>
         {
             FunToTheMoon funToTheMoon = new(this)
             {
-                gravity = config.FunToTheMoongravity,
-                BulletGiveAbsV = config.FunToTheMoonBulletGiveAbsV,
+                gravity = Math.Max(1, config.FunToTheMoongravity),
+                BulletGiveAbsV = Math.Max(0, config.FunToTheMoonBulletGiveAbsV),
             };
             FunLists.Add(funToTheMoon);
         }
@@ -130,8 +152,8 @@ public class FunMatchPlugin : BasePlugin, IPluginConfig<FunMatchPluginConfig>
         {
             FunWNoStop funWNoStop = new(this)
             {
-                BurnAfterSecond = config.FunWNoStopBurnAfterSecond,
-                BurnDamage = config.FunWNoStopBurnDamage,
+                BurnAfterSecond = Math.Max(0.1f, config.FunWNoStopBurnAfterSecond),
+                BurnDamage = Math.Max(0, config.FunWNoStopBurnDamage),
             };
             FunLists.Add(funWNoStop);
         }
@@ -166,7 +188,19 @@ public class FunMatchPlugin : BasePlugin, IPluginConfig<FunMatchPluginConfig>
     {
         if (CurrentActiceFunIndex >= 0) return;
 
-        if (playedFunIndices.Count == FunLists.Count)
+        if (FunLists.Count == 0)
+        {
+            Console.WriteLine("[FunMatchPlugin] No fun modes are enabled.");
+            return;
+        }
+
+        if (FunLists.Count == 1)
+        {
+            LoadFunByIndex(0);
+            return;
+        }
+
+        if (playedFunIndices.Count >= FunLists.Count)
         {
             playedFunIndices.Clear();
         }
@@ -179,24 +213,23 @@ public class FunMatchPlugin : BasePlugin, IPluginConfig<FunMatchPluginConfig>
 
         playedFunIndices.Add(newIndex);
         lastPlayedIndex = newIndex;
-        CurrentActiceFunIndex = newIndex;
-        FunLists[CurrentActiceFunIndex].Fun(this);
-        if (DisPlayHelp) FunLists[CurrentActiceFunIndex].DisPlayHelp();
+        LoadFunByIndex(newIndex);
     }
 
     public void LoadFunByOrderOrRandom()
     {
         if (CurrentActiceFunIndex >= 0) return;
 
-        if (Config.FunOrder.Count > 0 && currentFunOrderIndex < Config.FunOrder.Count)
+        while (currentFunOrderIndex < Config.FunOrder.Count)
         {
             int funIndex = Config.FunOrder[currentFunOrderIndex] - 1; // Convert to zero-based index
+            currentFunOrderIndex++;
             if (funIndex >= 0 && funIndex < FunLists.Count)
             {
                 LoadFunByIndex(funIndex);
-                currentFunOrderIndex++;
                 return;
             }
+            Console.WriteLine($"[FunMatchPlugin] Ignoring invalid FunOrder entry: {funIndex + 1}");
         }
 
         LoadRandomFun();
@@ -205,20 +238,39 @@ public class FunMatchPlugin : BasePlugin, IPluginConfig<FunMatchPluginConfig>
     public void UnLoadFun()
     {
         if (CurrentActiceFunIndex < 0) return;
-        FunLists[CurrentActiceFunIndex].EndFun(this);
+        int index = CurrentActiceFunIndex;
+        CurrentActiceFunIndex = -1;
+        FunLists[index].EndFun(this);
     }
 
     public void LoadFunByIndex(int index)
     {
-        if (index < 0 || index >= FunLists.Count) return;
-        FunLists[index].Fun(this);
-        if (DisPlayHelp) FunLists[index].DisPlayHelp();
+        if (index < 0 || index >= FunLists.Count || CurrentActiceFunIndex >= 0) return;
+
+        CurrentActiceFunIndex = index;
+        try
+        {
+            FunLists[index].Fun(this);
+            if (DisPlayHelp) FunLists[index].DisPlayHelp();
+        }
+        catch
+        {
+            try
+            {
+                FunLists[index].EndFun(this);
+            }
+            finally
+            {
+                CurrentActiceFunIndex = -1;
+            }
+            throw;
+        }
     }
 
     public void UnLoadFunByIndex(int index)
     {
-        if (index < 0 || index >= FunLists.Count) return;
-        FunLists[index].EndFun(this);
+        if (index != CurrentActiceFunIndex) return;
+        UnLoadFun();
     }
 
 
@@ -231,18 +283,23 @@ public class FunMatchPlugin : BasePlugin, IPluginConfig<FunMatchPluginConfig>
     private List<FunBaseClass> FunLists = new List<FunBaseClass>();
     private bool EnableRandom = true;
 
-    private GameEventHandler<EventRoundStart>? ManualLoadHander;
     private int ManualLoadIndex = -1;
 
     [GameEventHandler]
     public HookResult OnRoundStart(EventRoundStart @event, GameEventInfo info)
     {
-        if (!EnableRandom) return HookResult.Continue;
         UnLoadFun();
-        CurrentActiceFunIndex = -1;
         Server.NextFrame(() =>
         {
-            LoadFunByOrderOrRandom();
+            if (isUnloading) return;
+            if (ManualLoadIndex >= 0)
+            {
+                LoadFunByIndex(ManualLoadIndex);
+            }
+            else if (EnableRandom)
+            {
+                LoadFunByOrderOrRandom();
+            }
         });
         return HookResult.Continue;
     }
@@ -260,22 +317,23 @@ public class FunMatchPlugin : BasePlugin, IPluginConfig<FunMatchPluginConfig>
             commandInfo.ReplyToCommand($"Invalid num. pls input num from {1} - {FunLists.Count}");
             return;
         }
-        if (ManualLoadHander is not null)
+        if (ManualLoadIndex >= 0)
         {
             commandInfo.ReplyToCommand($"Alraedy loaded {ManualLoadIndex + 1} Manually, Pls !fun_load first");
             return;
         }
+
+        UnLoadFun();
         ManualLoadIndex = num - 1;
-        LoadFunByIndex(ManualLoadIndex);
-        RegisterEventHandler(ManualLoadHander = (@event, info) =>
+        try
         {
-            UnLoadFunByIndex(ManualLoadIndex);
-            Server.NextFrame(() =>
-            {
-                LoadFunByIndex(ManualLoadIndex);
-            });
-            return HookResult.Continue;
-        });
+            LoadFunByIndex(ManualLoadIndex);
+        }
+        catch
+        {
+            ManualLoadIndex = -1;
+            throw;
+        }
     }
 
     [ConsoleCommand("!fun_load", "UnLoad fun Manually")]
@@ -283,10 +341,16 @@ public class FunMatchPlugin : BasePlugin, IPluginConfig<FunMatchPluginConfig>
     [RequiresPermissions("@css/root")]
     public void OnUnLoadFunCommand(CCSPlayerController? player, CommandInfo commandInfo)
     {
-        UnLoadFunByIndex(ManualLoadIndex);
-        DeregisterEventHandler(ManualLoadHander!);
-        ManualLoadHander = null;
-        commandInfo.ReplyToCommand($"Unloaded {ManualLoadIndex + 1}");
+        if (ManualLoadIndex < 0)
+        {
+            commandInfo.ReplyToCommand("No manually loaded fun mode.");
+            return;
+        }
+
+        int unloadedIndex = ManualLoadIndex;
+        UnLoadFun();
+        ManualLoadIndex = -1;
+        commandInfo.ReplyToCommand($"Unloaded {unloadedIndex + 1}");
     }
 
     [ConsoleCommand("fun_lists", "Lists Avaliable Fun")]
@@ -321,7 +385,7 @@ public class FunMatchPlugin : BasePlugin, IPluginConfig<FunMatchPluginConfig>
     public void OnDontRandomCommand(CCSPlayerController? player, CommandInfo commandInfo)
     {
         EnableRandom = false;
-        UnLoadFun();
+        if (ManualLoadIndex < 0) UnLoadFun();
     }
 
     [ConsoleCommand("fun_random", "random Fun everyround")]

@@ -54,9 +54,9 @@ see [https://docs.cssharp.dev/docs/guides/getting-started.html](https://docs.css
 
 `!fun_random` 停用每回合随机模式 @css/root required
 
-`fun_load [num]` 手动加载模式 对应的数字可以在"funlists"指令查到 与随机模式独立 @css/root required
+`fun_load [num]` 手动加载模式，对应数字可通过 `fun_lists` 查询。手动模式会接管当前及后续回合，避免与随机模式参数叠加 @css/root required
 
-`!fun_load` 卸载手动加载的模式 @css/root required
+`!fun_load` 卸载手动模式；如已启用随机模式，随机模式将在下一回合继续 @css/root required
 
 ## Config 插件配置
 

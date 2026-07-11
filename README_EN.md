@@ -54,9 +54,9 @@ see [https://docs.cssharp.dev/docs/guides/getting-started.html](https://docs.css
 
 `!fun_random` will not load any random mode per round automatically @css/root required
 
-`fun_load [num]` load certain mode by num (num can be found in command "fun_lists") won't affect random load @css/root required
+`fun_load [num]` Manually load a mode. Use `fun_lists` to see available mode numbers. The manual mode takes over the current and following rounds to prevent mode settings from overlapping. @css/root required
 
-`!fun_load` Unload mode you manually load (num can be found in command "fun_lists") @css/root required
+`!fun_load` Unload the manual mode. If random mode is enabled, it resumes on the next round. @css/root required
 
 ## Config
 

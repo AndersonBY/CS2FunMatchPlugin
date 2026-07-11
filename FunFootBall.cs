@@ -13,22 +13,38 @@ public class FunFootBall : FunBaseClass
     public override string Decription => "FootBall Mode T aims to take soccerball to CTspawn 足球模式 T需要将球踢进CT出生点";
 
     private CPhysicsProp? SoccerBall;
+    private CDynamicProp? ScoreFlag;
     private Timer? BallStatusTimer;
     private Vector ScoreCenter = new(0, 0, 0);
     private Vector SoccerLastPosition = new(0, 0, 0);
     private Vector SoccerSpawnPosition = new(0, 0, 0);
     private int soccer_same_pos_times = 0;
     private BasePlugin.GameEventHandler<EventRoundFreezeEnd>? EventRoundFreezeEndHandler;
+    private BasePlugin.GameEventHandler<EventRoundEnd>? EventRoundEndHandler;
+    private float previousBuyTime;
+    private bool previousAutoKick;
+    private int previousBuyDuringImmunity;
+    private bool hasConVarSnapshot;
     public override void EndFun(FunMatchPlugin plugin)
     {
         Enabled = false;
-        ConVar.Find("mp_buytime")!.SetValue(20.0f);
-        ConVar.Find("mp_autokick")!.SetValue(true);
-        ConVar.Find("mp_buy_during_immunity")!.SetValue(0);
+        if (hasConVarSnapshot)
+        {
+            ConVar.Find("mp_buytime")!.SetValue(previousBuyTime);
+            ConVar.Find("mp_autokick")!.SetValue(previousAutoKick);
+            ConVar.Find("mp_buy_during_immunity")!.SetValue(previousBuyDuringImmunity);
+            hasConVarSnapshot = false;
+        }
         if (EventRoundFreezeEndHandler is not null)
-            plugin.DeregisterEventHandler(EventRoundFreezeEndHandler!);
+            plugin.DeregisterEventHandler(EventRoundFreezeEndHandler);
+        if (EventRoundEndHandler is not null)
+            plugin.DeregisterEventHandler(EventRoundEndHandler);
+        EventRoundFreezeEndHandler = null;
+        EventRoundEndHandler = null;
         if (BallStatusTimer is not null)
-            BallStatusTimer!.Kill();
+            BallStatusTimer.Kill();
+        BallStatusTimer = null;
+        RemoveRoundEntities();
     }
     public override void Fun(FunMatchPlugin plugin)
     {
@@ -38,6 +54,10 @@ public class FunFootBall : FunBaseClass
         SoccerLastPosition = new(0, 0, 0);
         SoccerSpawnPosition = new(0, 0, 0);
         soccer_same_pos_times = 0;
+        previousBuyTime = ConVar.Find("mp_buytime")!.GetPrimitiveValue<float>();
+        previousAutoKick = ConVar.Find("mp_autokick")!.GetPrimitiveValue<bool>();
+        previousBuyDuringImmunity = ConVar.Find("mp_buy_during_immunity")!.GetPrimitiveValue<int>();
+        hasConVarSnapshot = true;
         ConVar.Find("mp_buytime")!.SetValue(0.0f);
         ConVar.Find("mp_autokick")!.SetValue(false);
         ConVar.Find("mp_buy_during_immunity")!.SetValue(1);
@@ -65,6 +85,9 @@ public class FunFootBall : FunBaseClass
         */
         plugin.RegisterEventHandler<EventRoundFreezeEnd>(EventRoundFreezeEndHandler = (@event, info) =>
         {
+            if (!Enabled) return HookResult.Continue;
+            BallStatusTimer?.Kill();
+            RemoveRoundEntities();
             var Allplayers = Utilities.GetPlayers();
             bool HasGivenBall = false;
             bool HasSetScorePoint = false;
@@ -75,10 +98,11 @@ public class FunFootBall : FunBaseClass
                 p.RemoveWeapons();
                 if (p.PawnIsAlive && p.Team == CsTeam.Terrorist && HasGivenBall == false)
                 {
-                    HasGivenBall = true;
-                    SoccerBall = Utilities.CreateEntityByName<CPhysicsProp>("prop_physics_multiplayer")!;
                     var pawn = p.PlayerPawn.Get();
-                    Vector position = new(pawn!.AbsOrigin!.X, pawn!.AbsOrigin!.Y, pawn!.AbsOrigin!.Z + 100);
+                    SoccerBall = Utilities.CreateEntityByName<CPhysicsProp>("prop_physics_multiplayer");
+                    if (pawn?.AbsOrigin is null || SoccerBall is null) continue;
+                    HasGivenBall = true;
+                    Vector position = new(pawn.AbsOrigin.X, pawn.AbsOrigin.Y, pawn.AbsOrigin.Z + 100);
                     SoccerBall.Teleport(position);
                     SoccerBall.SetModel("models/props/de_dust/hr_dust/dust_soccerball/dust_soccer_ball001.vmdl");
                     //models/props/de_dust/hr_dust/dust_soccerball/dust_soccer_ball001.vmdl_c
@@ -91,15 +115,16 @@ public class FunFootBall : FunBaseClass
                 }
                 if (p.PawnIsAlive && p.Team == CsTeam.CounterTerrorist && HasSetScorePoint == false)
                 {
-                    HasSetScorePoint = true;
                     //models/props_fairgrounds/fairgrounds_flagpole01.vmdl
-                    var flag = Utilities.CreateEntityByName<CDynamicProp>("prop_dynamic")!;
+                    ScoreFlag = Utilities.CreateEntityByName<CDynamicProp>("prop_dynamic");
                     var pawn = p.PlayerPawn.Get();
+                    if (pawn?.AbsOrigin is null || ScoreFlag is null) continue;
+                    HasSetScorePoint = true;
                     //Vector position = new(pawn!.AbsOrigin!.X,pawn!.AbsOrigin!.Y,pawn!.AbsOrigin!.Z);
-                    flag.Teleport(pawn!.AbsOrigin);
-                    flag.SetModel("models/props_fairgrounds/fairgrounds_flagpole01.vmdl");
-                    flag.DispatchSpawn();
-                    ScoreCenter = flag!.AbsOrigin!;
+                    ScoreFlag.Teleport(pawn!.AbsOrigin);
+                    ScoreFlag.SetModel("models/props_fairgrounds/fairgrounds_flagpole01.vmdl");
+                    ScoreFlag.DispatchSpawn();
+                    ScoreCenter = ScoreFlag.AbsOrigin!;
                 }
             }
             //CCSPlayerResource siteA siteB position?
@@ -108,10 +133,12 @@ public class FunFootBall : FunBaseClass
             return HookResult.Stop;
         });
 
-        plugin.RegisterEventHandler<EventRoundEnd>((@event, info) =>
+        plugin.RegisterEventHandler<EventRoundEnd>(EventRoundEndHandler = (@event, info) =>
         {
-            EndFun(plugin);
-            return HookResult.Stop;
+            BallStatusTimer?.Kill();
+            BallStatusTimer = null;
+            RemoveRoundEntities();
+            return HookResult.Continue;
         });
     }
 
@@ -119,12 +146,12 @@ public class FunFootBall : FunBaseClass
     {
         if (Enabled == false)
         {
-            BallStatusTimer!.Kill();
+            BallStatusTimer?.Kill();
             return;
         }
         if (SoccerBall == null)
         {
-            BallStatusTimer!.Kill();
+            BallStatusTimer?.Kill();
             return;
         }
         if (IsBallIn())
@@ -156,8 +183,8 @@ public class FunFootBall : FunBaseClass
     private void TWin()
     {
         var gameRulesProxie = Utilities.FindAllEntitiesByDesignerName<CCSGameRulesProxy>("cs_gamerules");
-        var gameRules = gameRulesProxie.First().GameRules!;
-        if (gameRules!.WarmupPeriod)
+        var gameRules = gameRulesProxie.FirstOrDefault()?.GameRules;
+        if (gameRules is null || gameRules.WarmupPeriod)
             return;
         var Allplayers = Utilities.GetPlayers();
         foreach (var p in Allplayers)
@@ -200,5 +227,13 @@ public class FunFootBall : FunBaseClass
             return true;
         }
         return false;
+    }
+
+    private void RemoveRoundEntities()
+    {
+        if (SoccerBall is not null && SoccerBall.IsValid) SoccerBall.Remove();
+        if (ScoreFlag is not null && ScoreFlag.IsValid) ScoreFlag.Remove();
+        SoccerBall = null;
+        ScoreFlag = null;
     }
 }

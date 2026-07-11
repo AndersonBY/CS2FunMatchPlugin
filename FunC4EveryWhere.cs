@@ -27,21 +27,38 @@ public class FunC4EveryWhere : FunBaseClass
 
     private BasePlugin.GameEventHandler<EventBombPlanted>? EventBombPlantedHandler=null;
     private BasePlugin.GameEventHandler<EventPlayerDeath>? EventPlayerDeathHandler=null;
+    private bool previousAutoKick;
+    private int previousC4Timer;
+    private bool previousPlantAnywhere;
+    private bool previousCannotBeDefused;
+    private bool previousAnyoneCanPickup;
+    private bool previousIgnoreRoundWinConditions;
+    private bool hasConVarSnapshot;
     public override void Fun(FunMatchPlugin plugin)
     {
+        if (Enabled) return;
         Enabled = true;
-        ConVar.Find("sv_cheats")!.SetValue(true);
-        ConVar.Find("mp_autokick")!.SetValue(false);
-        ConVar.Find("mp_c4timer")!.SetValue(10);
-        ConVar.Find("mp_plant_c4_anywhere")!.SetValue(true);
-        ConVar.Find("mp_c4_cannot_be_defused")!.SetValue(true);
-        ConVar.Find("mp_anyone_can_pickup_c4")!.SetValue(true);
-        //ConVar.Find("mp_ignore_round_win_conditions")!.SetValue(true);
-        ConVar.Find("sv_cheats")!.SetValue(false);
+        Team_CT = null;
+        Team_T = null;
+        previousAutoKick = ConVar.Find("mp_autokick")!.GetPrimitiveValue<bool>();
+        previousC4Timer = ConVar.Find("mp_c4timer")!.GetPrimitiveValue<int>();
+        previousPlantAnywhere = ConVar.Find("mp_plant_c4_anywhere")!.GetPrimitiveValue<bool>();
+        previousCannotBeDefused = ConVar.Find("mp_c4_cannot_be_defused")!.GetPrimitiveValue<bool>();
+        previousAnyoneCanPickup = ConVar.Find("mp_anyone_can_pickup_c4")!.GetPrimitiveValue<bool>();
+        previousIgnoreRoundWinConditions = ConVar.Find("mp_ignore_round_win_conditions")!.GetPrimitiveValue<bool>();
+        hasConVarSnapshot = true;
+        WithCheats(() =>
+        {
+            ConVar.Find("mp_autokick")!.SetValue(false);
+            ConVar.Find("mp_c4timer")!.SetValue(10);
+            ConVar.Find("mp_plant_c4_anywhere")!.SetValue(true);
+            ConVar.Find("mp_c4_cannot_be_defused")!.SetValue(true);
+            ConVar.Find("mp_anyone_can_pickup_c4")!.SetValue(true);
+        });
 
         var gameRulesProxie = Utilities.FindAllEntitiesByDesignerName<CCSGameRulesProxy>("cs_gamerules");
         var CTeamArray = Utilities.FindAllEntitiesByDesignerName<CTeam>("cs_team_manager").ToArray();
-        gameRules = gameRulesProxie.First().GameRules!;
+        gameRules = gameRulesProxie.FirstOrDefault()?.GameRules;
         foreach (var t in CTeamArray)
         {
             if (t.Teamname == "CT") 
@@ -53,6 +70,7 @@ public class FunC4EveryWhere : FunBaseClass
         if (gameRules is null || Team_CT is null || Team_T is null)
         {
             Console.WriteLine("[C4 everywhere] Exception No Gamesrules/Team CTorT Found");
+            EndFun(plugin);
             return;
         }
 
@@ -68,7 +86,8 @@ public class FunC4EveryWhere : FunBaseClass
         plugin.RegisterEventHandler<EventBombPlanted> (EventBombPlantedHandler = (@event,info)=>
         {
             if (Enabled == false) return HookResult.Stop;
-            var player = @event.Userid!.OriginalControllerOfCurrentPawn.Get();
+            if (@event.Userid is null) return HookResult.Continue;
+            var player = @event.Userid.OriginalControllerOfCurrentPawn.Get();
             if (player is null || !player.IsValid) return HookResult.Continue;
             player.GiveNamedItem(CsItem.C4);
             return HookResult.Continue;
@@ -96,10 +115,7 @@ public class FunC4EveryWhere : FunBaseClass
             {
                 //gameRules.TerminateRound(3.0f,RoundEndReason.RoundDraw);
                 TerminateRoundFix(3.0f,RoundEndReason.RoundDraw);
-                roundTimer!.Kill();
-                roundTimer60!.Kill();
-                roundTimer90!.Kill();
-                roundTimer110!.Kill();
+                KillRoundTimers();
                 TeamHasWon = true;
                 var q = @event.Userid.Team;
             }
@@ -107,10 +123,7 @@ public class FunC4EveryWhere : FunBaseClass
             {
                 //gameRules.TerminateRound(3.0f,RoundEndReason.CTsWin);
                 TerminateRoundFix(3.0f,RoundEndReason.TargetBombed);
-                roundTimer!.Kill();
-                roundTimer60!.Kill();
-                roundTimer90!.Kill();
-                roundTimer110!.Kill();
+                KillRoundTimers();
                 TeamHasWon = true;
                 Team_CT!.Score++;
                 Utilities.SetStateChanged(Team_CT,"CTeam", "m_iScore");
@@ -119,10 +132,7 @@ public class FunC4EveryWhere : FunBaseClass
             {
                 //gameRules.TerminateRound(3.0f,RoundEndReason.TerroristsWin);
                 TerminateRoundFix(3.0f,RoundEndReason.BombDefused);
-                roundTimer!.Kill();
-                roundTimer60!.Kill();
-                roundTimer90!.Kill();
-                roundTimer110!.Kill();
+                KillRoundTimers();
                 TeamHasWon = true;
                 Team_T!.Score++;
                 Utilities.SetStateChanged(Team_T,"CTeam", "m_iScore");
@@ -133,15 +143,13 @@ public class FunC4EveryWhere : FunBaseClass
     }
     private void CTWin()
     {
+        if (!Enabled) return;
         //gameRules!.TerminateRound(0.1f,RoundEndReason.CTsWin);
         //gameRules!.RoundWinStatus = 8;
         //gameRules!.TotalRoundsPlayed++;
         //gameRules!.ITotalRoundsPlayed++;
         TerminateRoundFix(3.0f,RoundEndReason.CTsWin);
-        roundTimer!.Kill();
-        roundTimer60!.Kill();
-        roundTimer90!.Kill();
-        roundTimer110!.Kill();
+        KillRoundTimers();
         TeamHasWon = true;
         Team_CT!.Score++;
         Utilities.SetStateChanged(Team_CT,"CTeam", "m_iScore");
@@ -162,28 +170,42 @@ public class FunC4EveryWhere : FunBaseClass
     public override void EndFun(FunMatchPlugin plugin)
     {
         Enabled = false;
-        ConVar.Find("sv_cheats")!.SetValue(true);
-        ConVar.Find("mp_autokick")!.SetValue(true);
-        ConVar.Find("mp_c4timer")!.SetValue(40);
-        ConVar.Find("mp_plant_c4_anywhere")!.SetValue(false);
-        ConVar.Find("mp_c4_cannot_be_defused")!.SetValue(false);
-        ConVar.Find("mp_anyone_can_pickup_c4")!.SetValue(false);
-        ConVar.Find("mp_ignore_round_win_conditions")!.SetValue(false);
-        ConVar.Find("sv_cheats")!.SetValue(false);
-        if (roundTimer is not null)
-        roundTimer!.Kill();
-        if (roundTimer60 is not null)
-        roundTimer60!.Kill();
-        if (roundTimer90 is not null)
-        roundTimer90!.Kill();
-        if (roundTimer110 is not null)
-        roundTimer110!.Kill();
+        if (hasConVarSnapshot)
+        {
+            WithCheats(() =>
+            {
+                ConVar.Find("mp_autokick")!.SetValue(previousAutoKick);
+                ConVar.Find("mp_c4timer")!.SetValue(previousC4Timer);
+                ConVar.Find("mp_plant_c4_anywhere")!.SetValue(previousPlantAnywhere);
+                ConVar.Find("mp_c4_cannot_be_defused")!.SetValue(previousCannotBeDefused);
+                ConVar.Find("mp_anyone_can_pickup_c4")!.SetValue(previousAnyoneCanPickup);
+                ConVar.Find("mp_ignore_round_win_conditions")!.SetValue(previousIgnoreRoundWinConditions);
+            });
+            hasConVarSnapshot = false;
+        }
+        KillRoundTimers();
         TeamHasWon = false;
         if (EventBombPlantedHandler is not null)
         plugin.DeregisterEventHandler(EventBombPlantedHandler);
         if (EventPlayerDeathHandler is not null)
         plugin.DeregisterEventHandler(EventPlayerDeathHandler);
+        EventBombPlantedHandler = null;
+        EventPlayerDeathHandler = null;
+        foreach (var player in Utilities.GetPlayers().Where(player => player.IsValid))
+            player.RemoveAllItemsOnNextRoundReset = false;
 
+    }
+
+    private void KillRoundTimers()
+    {
+        roundTimer?.Kill();
+        roundTimer60?.Kill();
+        roundTimer90?.Kill();
+        roundTimer110?.Kill();
+        roundTimer = null;
+        roundTimer60 = null;
+        roundTimer90 = null;
+        roundTimer110 = null;
     }
 
     // to be fixed in https://github.com/roflmuffin/CounterStrikeSharp/issues/489

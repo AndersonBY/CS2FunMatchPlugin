@@ -16,7 +16,10 @@ public class FunHealTeammates : FunBaseClass
     public float BurnAfterSecond = 1.0F;
     public int BurnDamage = 5;
     public int HealValue = 10;
-    private bool ?LastConvar_friendlyfire;
+    private bool previousFriendlyFire;
+    private bool previousAutoKick;
+    private float previousFriendlyFireDamageReduction;
+    private bool hasConVarSnapshot;
     private BasePlugin.GameEventHandler<EventRoundFreezeEnd>? EventRoundFreezeEndHandler;
     private BasePlugin.GameEventHandler<EventPlayerDisconnect>? EventPlayerDisconnectHandler;
     private BasePlugin.GameEventHandler<EventPlayerConnectFull>? EventPlayerConnectFullHandler;
@@ -24,7 +27,7 @@ public class FunHealTeammates : FunBaseClass
     private Dictionary<int,Timer> playerTimersDict = new ();
     private void BurnPlayer(CCSPlayerPawn? pawn)
     {
-        if (pawn is null) return;
+        if (!Enabled || pawn is null || !pawn.IsValid || pawn.Health <= 0) return;
         pawn.Health -= BurnDamage;
         pawn.ApplyStressDamage = true;
         Utilities.SetStateChanged(pawn, "CBaseEntity", "m_iHealth");
@@ -36,19 +39,27 @@ public class FunHealTeammates : FunBaseClass
     public override void EndFun(FunMatchPlugin plugin)
     {
         Enabled = false;
-        ConVar.Find("mp_autokick")!.SetValue(true);
-        ConVar.Find("ff_damage_reduction_bullets")!.SetValue(0.1F);
+        if (hasConVarSnapshot)
+        {
+            ConVar.Find("mp_autokick")!.SetValue(previousAutoKick);
+            ConVar.Find("ff_damage_reduction_bullets")!.SetValue(previousFriendlyFireDamageReduction);
+            ConVar.Find("mp_friendlyfire")!.SetValue(previousFriendlyFire);
+            hasConVarSnapshot = false;
+        }
         foreach (var value in playerTimersDict.Values)
         {
             if (value is not null)
             value.Kill();
         }
         playerTimersDict.Clear();
-        plugin.DeregisterEventHandler (EventRoundFreezeEndHandler!);
-        plugin.DeregisterEventHandler (EventPlayerDisconnectHandler!);
-        plugin.DeregisterEventHandler (EventPlayerConnectFullHandler!);
-        plugin.DeregisterEventHandler (EventPlayerHurtHandler!);
-        ConVar.Find("mp_friendlyfire")!.SetValue(false);
+        if (EventRoundFreezeEndHandler is not null) plugin.DeregisterEventHandler(EventRoundFreezeEndHandler);
+        if (EventPlayerDisconnectHandler is not null) plugin.DeregisterEventHandler(EventPlayerDisconnectHandler);
+        if (EventPlayerConnectFullHandler is not null) plugin.DeregisterEventHandler(EventPlayerConnectFullHandler);
+        if (EventPlayerHurtHandler is not null) plugin.DeregisterEventHandler(EventPlayerHurtHandler);
+        EventRoundFreezeEndHandler = null;
+        EventPlayerDisconnectHandler = null;
+        EventPlayerConnectFullHandler = null;
+        EventPlayerHurtHandler = null;
     }
 
     public override void Fun(FunMatchPlugin plugin)
@@ -56,8 +67,11 @@ public class FunHealTeammates : FunBaseClass
         if (Enabled) return;
         Enabled = true;
 
+        previousAutoKick = ConVar.Find("mp_autokick")!.GetPrimitiveValue<bool>();
+        previousFriendlyFire = ConVar.Find("mp_friendlyfire")!.GetPrimitiveValue<bool>();
+        previousFriendlyFireDamageReduction = ConVar.Find("ff_damage_reduction_bullets")!.GetPrimitiveValue<float>();
+        hasConVarSnapshot = true;
         ConVar.Find("mp_autokick")!.SetValue(false);
-        LastConvar_friendlyfire = ConVar.Find("mp_friendlyfire")!.GetPrimitiveValue<bool>();
         ConVar.Find("mp_friendlyfire")!.SetValue(true);
         ConVar.Find("ff_damage_reduction_bullets")!.SetValue(0.0f);
         plugin.RegisterEventHandler <EventRoundFreezeEnd>(EventRoundFreezeEndHandler = (@event, info) =>
@@ -69,8 +83,9 @@ public class FunHealTeammates : FunBaseClass
             {
                 if (p.UserId is null || (int)p.UserId < 0 || !p.PawnIsAlive || p.OriginalControllerOfCurrentPawn is null) continue;
                 //if (p.IsBot) continue;
-                var pawn = p.OriginalControllerOfCurrentPawn.Get()!.PlayerPawn.Get();
-                playerTimersDict.TryAdd((int)p.UserId,plugin.AddTimer(BurnAfterSecond,() => BurnPlayer(pawn!),TimerFlags.REPEAT));
+                var pawn = p.OriginalControllerOfCurrentPawn.Get()?.PlayerPawn.Get();
+                if (pawn is null) continue;
+                ReplacePlayerTimer(plugin, (int)p.UserId, pawn);
             }
             return HookResult.Stop;
         });
@@ -79,14 +94,12 @@ public class FunHealTeammates : FunBaseClass
         {
             
             if (Enabled == false) return HookResult.Stop;
-            Timer ?playerTimer;
-            if (!@event.Userid!.IsValid) return HookResult.Continue;
-            var oringin = @event.Userid!.OriginalControllerOfCurrentPawn.Get()!;
+            if (@event.Userid is null || !@event.Userid.IsValid || @event.Userid.UserId is null) return HookResult.Continue;
+            var oringin = @event.Userid.OriginalControllerOfCurrentPawn.Get();
             if (oringin is null) return HookResult.Continue;
             CCSPlayerPawn ?pawn = oringin.PlayerPawn.Get();
             if (pawn is null) return HookResult.Continue;
-            playerTimer = plugin.AddTimer(BurnAfterSecond,() => BurnPlayer(pawn!),TimerFlags.REPEAT);
-            playerTimersDict.TryAdd((int)@event.Userid.UserId!,playerTimer);
+            ReplacePlayerTimer(plugin, (int)@event.Userid.UserId, pawn);
             return HookResult.Continue;
         });
 
@@ -95,8 +108,8 @@ public class FunHealTeammates : FunBaseClass
             
             if (Enabled == false) return HookResult.Stop;
             Timer ?playerTimer;
-            if (!@event.Userid!.IsValid) return HookResult.Continue;
-            playerTimersDict.TryGetValue((int)@event.Userid!.UserId!,out playerTimer);
+            if (@event.Userid?.UserId is null) return HookResult.Continue;
+            playerTimersDict.TryGetValue((int)@event.Userid.UserId,out playerTimer);
             if (playerTimer is null) return HookResult.Continue;
             playerTimer.Kill();
             playerTimersDict.Remove((int)@event.Userid.UserId);
@@ -106,15 +119,22 @@ public class FunHealTeammates : FunBaseClass
         //EventPlayerAvengedTeammate not working using playerhurtinstead
         plugin.RegisterEventHandler <EventPlayerHurt> (EventPlayerHurtHandler = (@event , info)=>
         {
-            if (@event.Attacker is null && @event.Userid is null) return HookResult.Continue;
+            if (!Enabled || @event.Attacker is null || @event.Userid is null) return HookResult.Continue;
             if (@event.Attacker == @event.Userid) return HookResult.Continue;
-            if (@event.Attacker!.Team != @event.Userid!.Team) return HookResult.Continue;
-            CCSPlayerPawn pawn = @event.Userid.OriginalControllerOfCurrentPawn.Get()!.PlayerPawn.Get()!;
+            if (@event.Attacker.Team != @event.Userid.Team) return HookResult.Continue;
+            CCSPlayerPawn? pawn = @event.Userid.OriginalControllerOfCurrentPawn.Get()?.PlayerPawn.Get();
+            if (pawn is null || !pawn.IsValid) return HookResult.Continue;
             pawn.Health += HealValue;
-            if (pawn.Health >= 100) pawn.Health = 100;
+            if (pawn.Health >= pawn.MaxHealth) pawn.Health = pawn.MaxHealth;
             Utilities.SetStateChanged(pawn, "CBaseEntity", "m_iHealth");
             return HookResult.Continue;
         });
 
+    }
+
+    private void ReplacePlayerTimer(FunMatchPlugin plugin, int userId, CCSPlayerPawn pawn)
+    {
+        if (playerTimersDict.Remove(userId, out var oldTimer)) oldTimer.Kill();
+        playerTimersDict[userId] = plugin.AddTimer(BurnAfterSecond, () => BurnPlayer(pawn), TimerFlags.REPEAT);
     }
 }

@@ -44,7 +44,9 @@ public class FunChangeWeaponOnShoot : FunBaseClass
             CsItem csItem = (CsItem)(guntype * 100 + guntype_add);
 
             var player = @event.Userid!.OriginalControllerOfCurrentPawn.Get();
+            if (player is null || !player.IsValid) return HookResult.Continue;
             var pawn = player!.PlayerPawn.Get();
+            if (pawn is null || !pawn.IsValid || pawn.WeaponServices is null) return HookResult.Continue;
             var cur_weapon = pawn!.WeaponServices!.ActiveWeapon.Get();
             if (cur_weapon is null) return HookResult.Continue;
             if (cur_weapon.DesignerName == "weapon_c4" || cur_weapon.DesignerName == "weapon_knife" || cur_weapon.DesignerName == "weapon_knife_t")
@@ -54,7 +56,8 @@ public class FunChangeWeaponOnShoot : FunBaseClass
 
             player!.GiveNamedItem(csItem);
             Server.NextFrame(()=>{
-                cur_weapon!.Remove();
+                if (!Enabled || !player.IsValid || !pawn.IsValid) return;
+                if (cur_weapon.IsValid) cur_weapon.Remove();
                 if (pawn!.WeaponServices!.ActiveWeapon.Get() is null)
                 {
                     player!.GiveNamedItem(CsItem.Knife);
@@ -67,7 +70,11 @@ public class FunChangeWeaponOnShoot : FunBaseClass
     public override void EndFun(FunMatchPlugin plugin)
     {
         Enabled = false;
-        plugin.DeregisterEventHandler(EventBulletImpactHandler!);
+        if (EventBulletImpactHandler is not null)
+        {
+            plugin.DeregisterEventHandler(EventBulletImpactHandler);
+            EventBulletImpactHandler = null;
+        }
     }
 }
 

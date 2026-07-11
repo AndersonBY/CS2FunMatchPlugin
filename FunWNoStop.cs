@@ -15,6 +15,8 @@ public class FunWNoStop: FunBaseClass
     private BasePlugin.GameEventHandler<EventPlayerDisconnect>? EventPlayerDisconnectHandler;
     private BasePlugin.GameEventHandler<EventPlayerConnectFull>? EventPlayerConnectFullHandler;
     private Dictionary<int,Timer> playerTimersDict = new ();
+    private bool previousAutoKick;
+    private bool hasAutoKickSnapshot;
     public FunWNoStop(FunMatchPlugin plugin) : base(plugin)
     {
     }
@@ -34,6 +36,8 @@ public class FunWNoStop: FunBaseClass
         if (Enabled) return;
         Enabled = true;
 
+        previousAutoKick = ConVar.Find("mp_autokick")!.GetPrimitiveValue<bool>();
+        hasAutoKickSnapshot = true;
         ConVar.Find("mp_autokick")!.SetValue(false);
         plugin.RegisterEventHandler <EventRoundFreezeEnd>(EventRoundFreezeEndHandler = (@event, info) =>
         {
@@ -45,7 +49,7 @@ public class FunWNoStop: FunBaseClass
                 if (p.UserId is null || (int)p.UserId < 0 || !p.PawnIsAlive || p.PlayerPawn is null) continue;
                 //if (p.IsBot) continue;
                 int playerid = (int)p.UserId;
-                playerTimersDict.TryAdd((int)p.UserId,plugin.AddTimer(BurnAfterSecond,() => CheckPlayerForward(playerid),TimerFlags.REPEAT));
+                ReplacePlayerTimer(plugin, playerid);
             }
             return HookResult.Stop;
         });
@@ -55,7 +59,8 @@ public class FunWNoStop: FunBaseClass
             
             if (Enabled == false) return HookResult.Stop;
             Timer ?playerTimer;
-            playerTimersDict.TryGetValue((int)@event.Userid!.UserId!,out playerTimer);
+            if (@event.Userid?.UserId is null) return HookResult.Continue;
+            playerTimersDict.TryGetValue((int)@event.Userid.UserId,out playerTimer);
             if (playerTimer is null) return HookResult.Continue;
             playerTimer.Kill();
             playerTimersDict.Remove((int)@event.Userid.UserId);
@@ -66,15 +71,14 @@ public class FunWNoStop: FunBaseClass
         {
             
             if (Enabled == false) return HookResult.Stop;
-            Timer ?playerTimer;
-            var oringin = @event.Userid!.OriginalControllerOfCurrentPawn.Get()!;
+            if (@event.Userid is null) return HookResult.Continue;
+            var oringin = @event.Userid.OriginalControllerOfCurrentPawn.Get();
             if (oringin is null) return HookResult.Continue;
             CCSPlayerPawn ?pawn = oringin.PlayerPawn.Get();
             if (pawn is null) return HookResult.Continue;
             if (@event.Userid.UserId is null) {Console.WriteLine("null userid"); return HookResult.Continue;}
             int playerid = (int)@event.Userid.UserId;
-            playerTimer = plugin.AddTimer(BurnAfterSecond,() => CheckPlayerForward(playerid),TimerFlags.REPEAT);
-            playerTimersDict.TryAdd((int)@event.Userid.UserId!,playerTimer);
+            ReplacePlayerTimer(plugin, playerid);
             return HookResult.Continue;
         });
         
@@ -82,30 +86,44 @@ public class FunWNoStop: FunBaseClass
 
     public void CheckPlayerForward(int id)
     {
+        if (!Enabled) return;
         CCSPlayerController? player = Utilities.GetPlayerFromUserid(id);
-        if (player is null || (int)player.UserId! < 0 || !player.PawnIsAlive || player.PlayerPawn is null)
+        if (player is null || player.UserId is null || (int)player.UserId < 0 || !player.PawnIsAlive || player.PlayerPawn is null)
         {
             return;
         }
         if (!player.Buttons.HasFlag(PlayerButtons.Forward) || player.Buttons.HasFlag(PlayerButtons.Back) || player.Buttons.HasFlag(PlayerButtons.Duck) || player.Buttons.HasFlag(PlayerButtons.Walk))
         {
-            CCSPlayerPawn ? pawn = player.OriginalControllerOfCurrentPawn.Get()!.PlayerPawn.Get();
-            BurnPlayer(pawn!);
+            CCSPlayerPawn ? pawn = player.OriginalControllerOfCurrentPawn.Get()?.PlayerPawn.Get();
+            if (pawn is not null) BurnPlayer(pawn);
         }
     }
 
     public override void EndFun(FunMatchPlugin plugin)
     {
         Enabled = false;
-        ConVar.Find("mp_autokick")!.SetValue(true);
+        if (hasAutoKickSnapshot)
+        {
+            ConVar.Find("mp_autokick")!.SetValue(previousAutoKick);
+            hasAutoKickSnapshot = false;
+        }
         foreach (var value in playerTimersDict.Values)
         {
             if (value is not null)
             value.Kill();
         }
         playerTimersDict.Clear();
-        plugin.DeregisterEventHandler (EventRoundFreezeEndHandler!);
-        plugin.DeregisterEventHandler (EventPlayerDisconnectHandler!);
-        plugin.DeregisterEventHandler (EventPlayerConnectFullHandler!);
+        if (EventRoundFreezeEndHandler is not null) plugin.DeregisterEventHandler(EventRoundFreezeEndHandler);
+        if (EventPlayerDisconnectHandler is not null) plugin.DeregisterEventHandler(EventPlayerDisconnectHandler);
+        if (EventPlayerConnectFullHandler is not null) plugin.DeregisterEventHandler(EventPlayerConnectFullHandler);
+        EventRoundFreezeEndHandler = null;
+        EventPlayerDisconnectHandler = null;
+        EventPlayerConnectFullHandler = null;
+    }
+
+    private void ReplacePlayerTimer(FunMatchPlugin plugin, int userId)
+    {
+        if (playerTimersDict.Remove(userId, out var oldTimer)) oldTimer.Kill();
+        playerTimersDict[userId] = plugin.AddTimer(BurnAfterSecond, () => CheckPlayerForward(userId), TimerFlags.REPEAT);
     }
 }
